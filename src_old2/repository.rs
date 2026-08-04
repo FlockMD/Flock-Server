@@ -7,3 +7,12 @@ use mongodb::Collection;
 pub struct DocumentRepository {
     collection: Collection<OpRecord>,
 }
+
+impl DocumentRepository {
+    pub async fn load(&self, doc_id: u32) -> Vec<Op> { 
+
+     }
+    pub async fn append_op(&self, op: &Op) -> Result<()> { 
+
+    }
+}

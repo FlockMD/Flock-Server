@@ -4,7 +4,6 @@ main.rs — starts the tokio runtime, binds the TCP/WebSocket listener, creates 
 
 use axum::{Router, routing::get, extract::{State, ws::{WebSocketUpgrade, WebSocket}}, response::Response};
 use std::sync::Arc;
-use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() {
@@ -13,9 +12,7 @@ async fn main() {
         .route("/ws", get(ws_handler))
         .with_state(router);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 

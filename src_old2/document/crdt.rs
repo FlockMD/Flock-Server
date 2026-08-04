@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 use std::collections::{HashMap, BTreeSet};
-use crate::types::{DocumentId, NodeId, Op};
-use crate::document::lamport::{self, Lamport};
+use crate::types::{NodeId, Op};
+use crate::document::lamport;
 
 #[derive(Clone)]
 struct Node {
@@ -13,7 +13,7 @@ struct Node {
 }
 
 pub struct Document {
-    doc_id: DocumentId,
+    doc_id: u32,
     // source of truth
     ops: Vec<Op>,
     // optional cache
@@ -54,18 +54,6 @@ fn node_from_op(op: &Op, lamport: &lamport::Lamport) -> Result<Node, String> {
 }
 
 impl Document {
-
-    // create empty doc, have document state populated via repository (or receive data from repository and populate here)
-    pub fn new(doc_id: DocumentId) -> Self {
-        Self {
-            doc_id,
-            ops: Vec::new(),
-            lamport: Lamport::new(),
-            nodes: Mutex::new(HashMap::new()),
-            children: Mutex::new(HashMap::new()),
-        }
-    }
-
     fn insert(&mut self, node: &Node) {
         self.nodes.lock().unwrap()
             .insert(node.id.clone(), node.clone());

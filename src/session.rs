@@ -3,8 +3,10 @@ session.rs — one instance per WebSocket connection. Two tasks in a select! loo
 */
 use axum::extract::ws::{WebSocket, Message};
 use futures::{StreamExt, SinkExt};
-use tokio::sync::{mpsc, broadcast, oneshot};
+use tokio::sync::{oneshot, broadcast};
+
 use std::sync::Arc;
+use serde_json;
 
 use crate::types::{UserId, DocumentId, DocMsg, ClientMsg, Op};
 use crate::router::Router;
@@ -17,75 +19,45 @@ pub struct Session {
 }
 
 impl Session {
+    pub fn new(
+        socket: WebSocket,
+        router: Arc<Router>,
+        user_id: UserId,
+        doc_id: DocumentId,
+    ) -> Self {
+        Self { socket, router, user_id, doc_id }
+    }
+
     pub async fn run(self) {
-        let doc_tx = self.router.get_or_spawn(self.doc_id).await;
+        let handle = self.router.get_or_spawn(self.doc_id).await;
+        let client_broadcast_rx = handle.client_broadcast_tx.subscribe();
 
-        // ask the actor for a broadcast receiver
-        let (reply_tx, reply_rx) = oneshot::channel();
-        let _ = doc_tx.send(DocMsg::Join {
-            user: self.user_id.clone(),
-            reply: reply_tx,
-        }).await;
-        let mut broadcast_rx = reply_rx.await.unwrap();
 
-        let (mut ws_tx, mut ws_rx) = self.socket.split();
+        let (mut ws_tx, mut ws_rx) = self.socket.split(); // our actual channel of communication with client
 
-        loop {
+        loop { // receive messages in a loop and hand off to appropriate task-manager
             tokio::select! {
-                msg = ws_rx.next() => {
-                    match msg {
-                        Some(Ok(Message::Text(text))) => {
-                            match serde_json::from_str::<Op>(&text) {
-                                Ok(op) => {
-                                    let _ = doc_tx.send(DocMsg::Edit {
-                                        user: self.user_id.clone(),
-                                        op,
-                                    }).await;
-                                }
-                                Err(_) => {
-                                    // malformed op — could send ClientMsg::Error back
-                                }
-                            }
-                        }
+                msg_from_client = ws_rx.next() => match msg_from_client {
+                    Some(Ok(Message::Text(msg))) => match msg {
+                        // parse from utf8 to struct via serde first
+                        DocMsg::Edit { user, op } => {
+                            // hand off to actor
+                        },
+                        _ => {}
+                    },
+                    Some(Err(e)) => {},
+                    _ => {}
+                },
+                msg_from_actor = client_broadcast_rx.recv() => match msg_from_actor {
+                    Ok(msg) => {
+                        // hand back to actor, which will apply changes and broadcast necessary info to all other clients
+                    },
+                    _ => {}
 
-                        // clean disconnect or socket dropped
-                        Some(Ok(Message::Close(_))) | Some(Err(_)) | None => {
-                            let _ = doc_tx.send(DocMsg::Leave {
-                                user: self.user_id.clone(),
-                            }).await;
-                            break;
-                        }
-
-                        // axum handles Ping/Pong automatically, safe to ignore
-                        Some(Ok(_)) => {}
-                    }
                 }
 
-                result = broadcast_rx.recv() => {
-                    match result {
-                        Ok(client_msg) => {
-                            let text = serde_json::to_string(&client_msg).unwrap();
-                            if ws_tx.send(Message::Text(text)).await.is_err() {
-                                let _ = doc_tx.send(DocMsg::Leave {
-                                    user: self.user_id.clone(),
-                                }).await;
-                                break;
-                            }
-                        }
-
-                        Err(broadcast::error::RecvError::Lagged(n)) => {
-                            // this session fell behind by n messages
-                            // for a CRDT you can recover by sending a full
-                            // snapshot of the current document state
-                        }
-
-                        Err(broadcast::error::RecvError::Closed) => {
-                            // document actor shut down
-                            break;
-                        }
-                    }
-                }
             }
         }
+
     }
 }
