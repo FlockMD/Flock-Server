@@ -62,8 +62,8 @@ pub type DocumentId = u64;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct NodeId {
-    pub user: UserId,
     pub lamport_id: u64,
+    pub user: UserId,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -89,11 +89,12 @@ pub struct Node {
     pub tombstone: bool,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub enum DocMsg {
-    Join {
-        user: UserId,
-        reply: oneshot::Sender<broadcast::Receiver<ClientMsg>>,
-    },
+    // Join {
+    //     user: UserId,
+    //     reply: oneshot::Sender<broadcast::Receiver<ClientMsg>>,
+    // },
     Leave { user: UserId },
     Edit  { user: UserId, op: Op },
     Save  { user: UserId },

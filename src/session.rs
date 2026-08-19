@@ -30,20 +30,27 @@ impl Session {
 
     pub async fn run(self) {
         let handle = self.router.get_or_spawn(self.doc_id).await;
-        let client_broadcast_rx = handle.client_broadcast_tx.subscribe();
+        let mut client_broadcast_rx = handle.client_broadcast_tx.subscribe();
 
 
         let (mut ws_tx, mut ws_rx) = self.socket.split(); // our actual channel of communication with client
 
         loop { // receive messages in a loop and hand off to appropriate task-manager
             tokio::select! {
+            
                 msg_from_client = ws_rx.next() => match msg_from_client {
-                    Some(Ok(Message::Text(msg))) => match msg {
-                        // parse from utf8 to struct via serde first
-                        DocMsg::Edit { user, op } => {
-                            // hand off to actor
-                        },
-                        _ => {}
+                    Some(Ok(Message::Text(text))) => match serde_json::from_str::<DocMsg>(&text) {
+                        Ok(msg) => {
+                            match msg {
+                                DocMsg::Edit { user: _, op: _ } => {
+                                    handle.doc_operation_tx.send(msg.clone());
+                                },
+                                _ => {}
+                            }
+                        }
+                        Err(e) => {
+                            
+                        }
                     },
                     Some(Err(e)) => {},
                     _ => {}

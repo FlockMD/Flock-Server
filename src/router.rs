@@ -10,7 +10,7 @@ use crate::document::actor::DocumentActor;
 use crate::repository::DocumentRepository;
 
 
-// this will be sent to session: session needs to send messages to the client (those messages are received by subscribinbg to client_broadcast_tx)
+// this will be sent to session: session needs to send messages to the client (those messages are received by subscribing to client_broadcast_tx)
 // session also needs to be able to send actor messages
 #[derive(Clone)]
 pub struct DocumentHandle {

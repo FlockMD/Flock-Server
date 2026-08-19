@@ -14,11 +14,8 @@ struct Node {
 
 pub struct Document {
     doc_id: DocumentId,
-    // source of truth
     ops: Vec<Op>,
-    // optional cache
     lamport: lamport::Lamport,
-
     // full document state:
     nodes: Mutex<HashMap<NodeId, Node>>,
     // parent -> children

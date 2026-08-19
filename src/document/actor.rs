@@ -20,7 +20,6 @@ pub struct DocumentActor {
 impl DocumentActor {
     pub async fn new(
         doc_id: DocumentId,
-        // transmitter 
         doc_operation_rx: mpsc::Receiver<DocMsg>,
         client_broadcast_tx: broadcast::Sender<ClientMsg>,
         repo: Arc<DocumentRepository>,
