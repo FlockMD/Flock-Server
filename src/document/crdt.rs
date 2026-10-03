@@ -1,145 +1,94 @@
-use std::sync::Mutex;
-use std::collections::{HashMap, BTreeSet};
-use crate::types::{DocumentId, NodeId, Op};
-use crate::document::lamport::{self, Lamport};
+/*
+document/crdt.rs — the CRDT itself: an RGA-style tree of nodes, kept as
+plain (non-atomic, non-mutex) state.
 
-#[derive(Clone)]
-struct Node {
-    id: NodeId,
-    // RGA anchor
-    parent: Option<NodeId>,
-    content: char,
-    tombstone: bool,
-}
+A Document is only ever mutated from inside its owning DocumentActor's
+single-threaded message loop, so there is exactly one writer and no need
+for interior mutability here. All synchronization concerns belong to the
+actor, not to the data structure.
+*/
+use std::collections::{BTreeSet, HashMap};
+
+use crate::document::lamport::Lamport;
+use crate::types::{DocumentId, Node, NodeId, Op};
 
 pub struct Document {
     doc_id: DocumentId,
-    ops: Vec<Op>,
-    lamport: lamport::Lamport,
-    // full document state:
-    nodes: Mutex<HashMap<NodeId, Node>>,
-    // parent -> children
-    children: Mutex<HashMap<Option<NodeId>, BTreeSet<NodeId>>>,
-}
-
-fn node_from_op(op: &Op, lamport: &lamport::Lamport) -> Result<Node, String> {
-    match op {
-        Op::Insert {
-            request_time,
-            user,
-            content,
-            parent,
-        } => {
-            let lamport_id = lamport.tick(*request_time);
-            let id = NodeId {
-                user: user.clone(),
-                lamport_id,
-            };
-
-            Ok(Node {
-                id,
-                parent: parent.clone(),
-                content: *content,
-                tombstone: false,
-            })
-        },
-        Op::Delete { id: _ } => {
-            Err(String::from("Delete operation not supported to create new node"))
-        }
-    }
-
+    lamport: Lamport,
+    nodes: HashMap<NodeId, Node>,
+    // parent -> children, ordered so render() walks them in CRDT order
+    children: HashMap<Option<NodeId>, BTreeSet<NodeId>>,
 }
 
 impl Document {
-
-    // create empty doc, have document state populated via repository (or receive data from repository and populate here)
     pub fn new(doc_id: DocumentId) -> Self {
         Self {
             doc_id,
-            ops: Vec::new(),
             lamport: Lamport::new(),
-            nodes: Mutex::new(HashMap::new()),
-            children: Mutex::new(HashMap::new()),
+            nodes: HashMap::new(),
+            children: HashMap::new(),
         }
     }
 
-    fn insert(&mut self, node: &Node) {
-        self.nodes.lock().unwrap()
-            .insert(node.id.clone(), node.clone());
-
-        self.children.lock().unwrap()
-            .entry(node.parent.clone())
-            .or_default()
-            .insert(node.id.clone());
-
-    }
-
-    fn delete(&mut self, id: &NodeId) {
-        // ideally we only lock the node we're currently 'deleting', but for ease of development for now we will lock entire structure
-        let mut nodes = self.nodes.lock().unwrap();
-        if let Some(node) = nodes.get_mut(id) {
-            node.tombstone = true;
-        };
-
-    }
-
-    /*
-    we will move this to when message is received, so on reception we can 
-    (if message is node write) create internal node representation, call on publisher
-    to broadcast to other clients, and then proceed with insertion in server
-
-    fn apply(&mut self, op: &Op)  {
+    /// Applies one operation, mutating local state in place
+    /// 
+    /// # Arguments
+    ///
+    /// * `op` - The operation to apply
+    ///
+    /// # Returns
+    ///
+    /// The operation that was applied, including the new node id if it was modified (by lamport clock, etc.)
+    pub fn apply(&mut self, op: &Op) -> Option<Op> {
         match op {
-            Op::Insert { .. } => {
-
-                let res = node_from_op(op, &(self.lamport));
-
-                let node = match res {
-                    Ok(node) => {
-                        node
-                    }
-                    Err(e) => {
-                        println!("{e}");
-                        return;
-                    }
+            Op::Insert { request_time, user, content, parent } => {
+                let lamport_id = self.lamport.tick(*request_time);
+                let id = NodeId { lamport_id, user: *user };
+                let node = Node {
+                    id: id.clone(),
+                    parent: parent.clone(),
+                    content: *content,
+                    tombstone: false,
                 };
 
-                
+                self.children.entry(parent.clone()).or_default().insert(id.clone());
+                self.nodes.insert(id, node);
+                Some(
+                    Op::Insert {
+                        request_time: *request_time,
+                        user: *user,
+                        content: *content,
+                        parent: parent.clone(),
+                    }
+                )
             }
-
             Op::Delete { id } => {
-               
+                if let Some(node) = self.nodes.get_mut(id) {
+                    node.tombstone = true;
+                }
+                Some(op.clone())
             }
         }
     }
-    */
 
-    /*
-
-    fn render(&self) -> String {
+    /// Renders the document to plain text by walking the tree in CRDT
+    /// order, skipping tombstoned (deleted) nodes.
+    pub fn render(&self) -> String {
         let mut out = String::new();
-
-        fn walk(
-            parent: Option<NodeId>,
-            doc: &Document,
-            out: &mut String,
-        ) {
-            if let Some(children) = doc.children.get(&parent) {
-                for id in children {
-                    let node = &doc.nodes[id];
-
-                    if !node.tombstone {
-                        out.push(node.content);
-                    }
-
-                    walk(Some(id.clone()), doc, out);
-                }
-            }
-        }
-
-        walk(None, self, &mut out);
-
+        self.walk(None, &mut out);
         out
     }
-     */
+
+    fn walk(&self, parent: Option<NodeId>, out: &mut String) {
+        let Some(children) = self.children.get(&parent) else {
+            return;
+        };
+        for id in children {
+            let node = &self.nodes[id];
+            if !node.tombstone {
+                out.push(node.content);
+            }
+            self.walk(Some(id.clone()), out);
+        }
+    }
 }
