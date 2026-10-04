@@ -71,24 +71,24 @@ impl Document {
         }
     }
 
-    /// Renders the document to plain text by walking the tree in CRDT
-    /// order, skipping tombstoned (deleted) nodes.
-    pub fn render(&self) -> String {
+    fn walk(&self) -> String {
         let mut out = String::new();
-        self.walk(None, &mut out);
-        out
-    }
+        let mut stack: Vec<NodeId> = Vec::new();
 
-    fn walk(&self, parent: Option<NodeId>, out: &mut String) {
-        let Some(children) = self.children.get(&parent) else {
-            return;
-        };
-        for id in children {
-            let node = &self.nodes[id];
+        // By pushing in ascending order, we'll pop the child with the largest lamport clock id first
+        if let Some(roots) = self.children.get(&None) {
+            stack.extend(roots.iter().copied());
+        }
+
+        while let Some(id) = stack.pop() {
+            let node = &self.nodes[&id];
             if !node.tombstone {
                 out.push(node.content);
             }
-            self.walk(Some(id.clone()), out);
+            if let Some(children) = self.children.get(&Some(id)) {
+                stack.extend(children.iter().copied());
+            }
         }
+        out
     }
 }
